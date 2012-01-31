@@ -55,6 +55,11 @@ static const struct option OPTIONS[] = {
   { NULL, 0, NULL, 0 },
 };
 
+static int do_reboot = 1;
+static int reboot_method = 1;
+static int multi = 0;
+char os[50];
+
 static const char *COMMAND_FILE = "/cache/recovery/command";
 static const char *INTENT_FILE = "/cache/recovery/intent";
 static const char *LOG_FILE = "/cache/recovery/log";
@@ -242,6 +247,12 @@ get_args(int *argc, char ***argv) {
     if (device_flash_type() == MTD) {
         set_bootloader_message(&boot);
     }
+}
+
+int
+print_and_error(const char* str) {
+ui_print(str,0);
+return 1;
 }
 
 void
@@ -689,9 +700,95 @@ wipe_data(int confirm) {
     ui_print("Data wipe complete.\n");
 }
 
+static void init_os (char** items,int boot) {    
+    if ( !strlen(os) ) {
+				load_volume_table("/etc/recovery.fstab");
+				process_volumes();
+				return;
+			}
+
+	ensure_path_unmounted("/data");
+    ensure_path_unmounted("/system");
+    ensure_path_mounted("/sdcard");
+    
+    char* filename;
+    filename=calloc(50,sizeof(char));
+    sprintf(filename,"/sdcard/%s/fstab",os);
+    load_volume_table(filename);
+    process_volumes();
+    
+    items[boot]=calloc(70,sizeof(char));
+    strcpy(items[boot],"Boot ");
+    strcat(items[boot],os);
+}
+
+void start_os() {
+			if ( !strlen(os) ) {
+				ui_print("You can't start internal os from here!\n");
+				return;
+			}
+            ui_print("\nINIT New OS...");
+            char* initrc_name;
+            char* initsh_name;
+            char* dir_name;
+            FILE* f;
+            int err;
+          
+			initrc_name = malloc(60 * sizeof(char));
+			initsh_name = malloc(60 * sizeof(char));
+			strcpy(initrc_name,"/sdcard/");
+			strcat(initrc_name,os);
+			dir_name = malloc( (strlen(initrc_name)+1)*sizeof(char) );
+			strcpy(dir_name,initrc_name);
+			strcpy(initsh_name,initrc_name);
+          
+			if (!chdir("/etc")) {
+			  chdir(("/"));
+			  if ( ensure_path_unmounted("/system") ) //We don't want to "hurt" the real /system/etc dir in any case.
+			    return print_and_error("Please unmount system manually\n");
+			  unlink("/etc"); //Success only if it's a symlink(file)
+			  dirUnlinkHierarchy("/etc"); //Then it should be an empty dir
+			  symlink("/system/etc","/etc");
+			}
+			//New method
+			if ( !ensure_path_mounted("/data") ) {
+				if ( !ensure_path_mounted("/system") ) {
+					strcat(initrc_name,"/init.rc");
+					strcat(initsh_name,"/init.sh");
+					if ( ( f=fopen(initsh_name,"r") ) ) {
+						ui_print("done\ninit.sh found, executing..\nPlease wait...\n");
+							ui_end_menu();
+							finish_recovery(NULL);
+							do_reboot=0;
+							char init_cmd[128];
+							sprintf(init_cmd,"/sbin/sh %s",initsh_name);
+								execv(init_cmd, NULL);
+					}
+					else if ( ( f=fopen(initrc_name,"r") ) ) {
+						fclose(f);
+						char cp_cmd[PATH_MAX];
+						sprintf(cp_cmd,"cp -f %s %s",initrc_name,"/init.rc");
+						if ( !__system(cp_cmd) ) {
+							ui_print("done\nBooting New OS..\nPlease wait...\n");
+							ui_end_menu();
+							finish_recovery(NULL);
+							do_reboot=0;
+								execv("/init", NULL);
+						} else LOGE("Can't copy init.rc to init.rc\n%s\n%s\n",cp_cmd,strerror(errno));
+					} else LOGE("Can't open init.rc\n%s\n",strerror(errno));
+				} else LOGE("Can't mount system image\n%s\n",strerror(errno));
+			} else LOGE("Can't mount data image\n%s\n",strerror(errno));
+						
+			free(dir_name);
+			free(initrc_name);
+}
+
 static void
 prompt_and_wait() {
     char** headers = prepend_title((const char**)MENU_HEADERS);
+    char** items = MENU_ITEMS;
+
+    init_os(items,ITEM_CHOOSE_OS);  //Set the pointers to the actual device/image
 
     for (;;) {
         finish_recovery(NULL);
@@ -708,6 +805,7 @@ prompt_and_wait() {
 
         switch (chosen_item) {
             case ITEM_REBOOT:
+				do_reboot=1;
                 poweroff=0;
                 return;
 
@@ -753,11 +851,173 @@ prompt_and_wait() {
             case ITEM_ADVANCED:
                 show_advanced_menu();
                 break;
+	    case ITEM_CHOOSE_OS:
+                start_os();
+                break;
             case ITEM_POWEROFF:
+				do_reboot=1;
+                poweroff=1;
+                return;
+            case GO_BACK:
+				do_reboot=0;
                 poweroff=1;
                 return;
         }
     }
+}
+
+static char
+        pre_menu()
+{
+    static char* headers[] = { 	"              Boot loader by Xmister",
+                                "            -- LG Optimus Star P990 --",
+                                "",
+                                "Use Up/Down and OK to select",
+                                "",
+                                "Choose a recovery:",
+                                "",
+                                NULL };
+
+    // these constants correspond to elements of the items[] list.
+#define ITEM_RECOVERY      0
+
+	static char* list[20];
+    int err;
+    int init = 1;
+    int chosen_item=0;
+	
+	list[0]=NULL;
+	
+	//In case if something goes wrong
+	ui_print("."); //9
+	finish_recovery(NULL);
+
+	ui_reset_progress();
+
+    allow_display_toggle = 0;
+	
+	
+    for (;;) {
+		if (init) {
+			ui_print("."); //10
+			if (ensure_path_mounted("/sdcard")) {
+				LOGE("BL: Cant' mount SDCARD\n");
+				return 1;
+			}
+			//Give a chance to filesystems to unmount properly
+			ensure_path_unmounted("/system");
+			ensure_path_unmounted("/data");
+			ensure_path_unmounted("/cache");
+			
+			
+			int i;
+			for (i=0; list[i] != NULL; i++) {
+				free(list[i]);
+			}
+			list[0]=NULL;
+			
+			ui_print("."); //11
+			
+			FILE* f = fopen("/sdcard/.bootlst", "r");
+			if (f == NULL) {
+				ui_print("\n");
+				return 1;
+			}
+				list[ITEM_RECOVERY]="Start Internal";
+				static char* prefix="Start ";
+				i=ITEM_RECOVERY+1;
+				while(!feof(f))
+				{
+					char* temp=calloc(50,sizeof(char));
+					list[i]=malloc(50 * sizeof(char));
+					fgets(temp,50,f);
+					int j=0;
+					for(j=0;j<50;j++) {
+						if(temp[j] == '\n' || temp[j] == '\r') {
+							temp[j]='\0';
+							break;
+						}
+					}
+					int x;
+					for (x=0;x<i;x++)
+						if (!strcmp(&(list[x][6]),temp)) break;
+					if ( i == x ) {
+						strcpy(list[i],prefix);
+						strncpy(&(list[i][6]),temp,42);
+						i++;
+					}
+				}
+				list[i-1]=NULL;
+				fclose(f);
+			if ( i > ITEM_RECOVERY+1) multi=1;
+			else {
+				multi=0;
+				return 1;
+			}
+			ui_print("."); //12
+			sync();
+			//rest a bit, to let FS's to be detected and unmounted properly
+			sleep(3);
+			ui_print("."); //13
+			int err=0;
+			if (ensure_path_unmounted("/system")) {
+				LOGE("BL: Cant' unmount SYSTEM\n");
+				err=1;
+			}
+			if (ensure_path_unmounted("/data")){
+				LOGE("BL: Cant' unmount SYSTEM\n");
+				err=1;
+			}
+			if (ensure_path_unmounted("/cache")){
+				LOGE("BL: Cant' unmount SYSTEM\n");
+				err=1;
+			}
+			ui_print("."); //14
+			if (err) return err;
+			ui_clear_key_queue();
+			init=0;
+			err = 0;
+			
+			//Write back the filtered list while the user chooses	
+			pid_t pid = fork();
+			if ( pid == 0 )	{
+				f = fopen("/sdcard/.bootlst","w");
+				if ( f != NULL ) {
+					for (i=1; list[i] != NULL; i++ ) {
+						fputs(&(list[i][6]),f);
+						fputc('\n',f);
+					}
+					check_and_fclose(f,"/sdcard/.bootlst");
+				}
+				_exit(-1);
+			}
+			else {
+				ui_print("Menu\n");
+				chosen_item = get_menu_selection(headers,list,1,chosen_item);
+				ui_print(".\n"); //15
+			}
+		}
+
+        if (chosen_item >= ITEM_RECOVERY) {
+            // turn off the menu, letting ui_print() to scroll output
+            // on the screen.
+            if (chosen_item > ITEM_RECOVERY) strcpy(os,&(list[chosen_item][6]));
+			else os[0]='\0';
+			ui_end_menu();
+			prompt_and_wait();
+			if (do_reboot) return 0;
+			else {
+				init=1;
+				do_reboot=1;
+			}
+		}
+		else if ( chosen_item == GO_BACK ) {
+			do_reboot=1;
+			reboot_method=1;
+			return 0;
+		}
+	}
+return 1;
 }
 
 static void
@@ -790,7 +1050,7 @@ main(int argc, char **argv) {
 #ifdef BOARD_RECOVERY_HANDLES_MOUNT
         if (strstr(argv[0], "mount") && argc == 2 && !strstr(argv[0], "umount"))
         {
-            load_volume_table();
+            load_volume_table("/etc/recovery.fstab");
             return ensure_path_mounted(argv[1]);
         }
 #endif
@@ -813,7 +1073,7 @@ main(int argc, char **argv) {
 
     ui_init();
     ui_print(EXPAND(RECOVERY_VERSION)"\n");
-    load_volume_table();
+    load_volume_table("/etc/recovery.fstab");
     process_volumes();
     LOGI("Processing arguments.\n");
     get_args(&argc, &argv);
@@ -949,11 +1209,13 @@ main(int argc, char **argv) {
             LOGI("Skipping execution of extendedcommand, file not found...\n");
         }
     }
-
+	
+    int ret=0;
     if (status != INSTALL_SUCCESS && !is_user_initiated_recovery) ui_set_background(BACKGROUND_ICON_ERROR);
-    if (status != INSTALL_SUCCESS || ui_text_visible()) {
-        prompt_and_wait();
-    }
+    if (status != INSTALL_SUCCESS || ui_text_visible()) ret=pre_menu();
+
+    /*On error, or if choosed, show recovery*/
+    if ( ret ) prompt_and_wait();
 
     // If there is a radio image pending, reboot now to install it.
     maybe_install_firmware_update(send_intent);

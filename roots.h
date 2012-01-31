@@ -46,4 +46,8 @@ Volume* get_device_volumes();
 int is_data_media();
 void setup_data_media();
 
+void recheck();
+
+int create_mknods(int n);
+
 #endif  // RECOVERY_ROOTS_H_

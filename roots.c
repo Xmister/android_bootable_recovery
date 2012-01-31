@@ -33,6 +33,7 @@
 
 int num_volumes;
 Volume* device_volumes;
+static int check_need=0;
 
 int get_num_volumes() {
     return num_volumes;
@@ -50,13 +51,21 @@ static int is_null(const char* sz) {
     return 0;
 }
 
+void recheck() {
+	check_need=1;
+}
+
+static void check_fs() {
+//TODO
+}
+
 static char* dupe_string(const char* sz) {
     if (is_null(sz))
         return NULL;
     return strdup(sz);
 }
 
-void load_volume_table() {
+void load_volume_table(const char* fstab_path) {
     int alloc = 2;
     device_volumes = malloc(alloc * sizeof(Volume));
 
@@ -69,9 +78,10 @@ void load_volume_table() {
     device_volumes[0].fs_options2 = NULL;
     num_volumes = 1;
 
-    FILE* fstab = fopen("/etc/recovery.fstab", "r");
+	ui_print("%s\n",fstab_path);
+    FILE* fstab = fopen(fstab_path, "r");
     if (fstab == NULL) {
-        LOGE("failed to open /etc/recovery.fstab (%s)\n", strerror(errno));
+        LOGE("failed to open %s (%s)\n", fstab_path, strerror(errno));
         return;
     }
 
@@ -115,7 +125,7 @@ void load_volume_table() {
             }
             ++num_volumes;
         } else {
-            LOGE("skipping malformed recovery.fstab line: %s\n", original);
+            LOGE("skipping malformed %s line: %s\n", fstab_path, original);
         }
         free(original);
     }
@@ -149,6 +159,7 @@ int try_mount(const char* device, const char* mount_point, const char* fs_type, 
     if (device == NULL || mount_point == NULL || fs_type == NULL)
         return -1;
     int ret = 0;
+    LOGE("%s %s %s %s",device, mount_point, fs_type, fs_options);
     if (fs_options == NULL) {
         ret = mount(device, mount_point, fs_type,
                        MS_NOATIME | MS_NODEV | MS_NODIRATIME, "");

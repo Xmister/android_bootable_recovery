@@ -728,19 +728,19 @@ void start_os() {
 				return;
 			}
             ui_print("\nINIT New OS...");
-            char* initrc_name;
+            char* initrcs_name;
             char* initsh_name;
             char* dir_name;
             FILE* f;
             int err;
           
-			initrc_name = malloc(60 * sizeof(char));
+			initrcs_name = malloc(60 * sizeof(char));
 			initsh_name = malloc(60 * sizeof(char));
-			strcpy(initrc_name,"/sdcard/");
-			strcat(initrc_name,os);
-			dir_name = malloc( (strlen(initrc_name)+1)*sizeof(char) );
-			strcpy(dir_name,initrc_name);
-			strcpy(initsh_name,initrc_name);
+			strcpy(initrcs_name,"/sdcard/");
+			strcat(initrcs_name,os);
+			dir_name = malloc( (strlen(initrcs_name)+1)*sizeof(char) );
+			strcpy(dir_name,initrcs_name);
+			strcpy(initsh_name,initrcs_name);
           
 			if (!chdir("/etc")) {
 			  chdir(("/"));
@@ -753,9 +753,10 @@ void start_os() {
 			//New method
 			if ( !ensure_path_mounted("/data") ) {
 				if ( !ensure_path_mounted("/system") ) {
-					strcat(initrc_name,"/init.rc");
+					strcat(initrcs_name,"/init*.rc");
 					strcat(initsh_name,"/init.sh");
 					if ( ( f=fopen(initsh_name,"r") ) ) {
+						fclose(f);
 						ui_print("done\ninit.sh found, executing..\nPlease wait...\n");
 							ui_end_menu();
 							finish_recovery(NULL);
@@ -764,10 +765,9 @@ void start_os() {
 							sprintf(init_cmd,"/sbin/sh %s",initsh_name);
 								execv(init_cmd, NULL);
 					}
-					else if ( ( f=fopen(initrc_name,"r") ) ) {
-						fclose(f);
-						char cp_cmd[PATH_MAX];
-						sprintf(cp_cmd,"cp -f %s %s",initrc_name,"/init.rc");
+					else {
+						char cp_cmd[256];
+						sprintf(cp_cmd,"cp -f %s %s",initrcs_name,"/");
 						if ( !__system(cp_cmd) ) {
 							ui_print("done\nBooting New OS..\nPlease wait...\n");
 							ui_end_menu();
@@ -775,12 +775,12 @@ void start_os() {
 							do_reboot=0;
 								execv("/init", NULL);
 						} else LOGE("Can't copy init.rc to init.rc\n%s\n%s\n",cp_cmd,strerror(errno));
-					} else LOGE("Can't open init.rc\n%s\n",strerror(errno));
+					} 
 				} else LOGE("Can't mount system image\n%s\n",strerror(errno));
 			} else LOGE("Can't mount data image\n%s\n",strerror(errno));
 						
 			free(dir_name);
-			free(initrc_name);
+			free(initrcs_name);
 }
 
 static void
@@ -860,7 +860,6 @@ prompt_and_wait() {
                 return;
             case GO_BACK:
 				do_reboot=0;
-                poweroff=1;
                 return;
         }
     }
@@ -992,7 +991,6 @@ static char
 				_exit(-1);
 			}
 			else {
-				ui_print("Menu\n");
 				chosen_item = get_menu_selection(headers,list,1,chosen_item);
 				ui_print(".\n"); //15
 			}

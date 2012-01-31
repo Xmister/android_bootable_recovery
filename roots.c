@@ -159,7 +159,6 @@ int try_mount(const char* device, const char* mount_point, const char* fs_type, 
     if (device == NULL || mount_point == NULL || fs_type == NULL)
         return -1;
     int ret = 0;
-    LOGE("%s %s %s %s",device, mount_point, fs_type, fs_options);
     if (fs_options == NULL) {
         ret = mount(device, mount_point, fs_type,
                        MS_NOATIME | MS_NODEV | MS_NODIRATIME, "");

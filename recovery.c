@@ -1214,8 +1214,13 @@ main(int argc, char **argv) {
     if (status != INSTALL_SUCCESS && !is_user_initiated_recovery) ui_set_background(BACKGROUND_ICON_ERROR);
     if (status != INSTALL_SUCCESS || ui_text_visible()) ret=pre_menu();
 
-    /*On error, or if choosed, show recovery*/
-    if ( ret ) prompt_and_wait();
+    if (status != INSTALL_SUCCESS && !is_user_initiated_recovery) {
+        ui_set_show_text(1);
+        ui_set_background(BACKGROUND_ICON_ERROR);
+    }
+    if (status != INSTALL_SUCCESS || ui_text_visible()) {
+        prompt_and_wait();
+    }
 
     // If there is a radio image pending, reboot now to install it.
     maybe_install_firmware_update(send_intent);
